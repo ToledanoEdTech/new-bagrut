@@ -183,5 +183,7 @@ export async function getMissingEntriesForSession(
   session: AuthSession
 ): Promise<MissingEntriesResponse | null> {
   if (!isFullAdmin(session)) return null;
-  return cached("admin:missing-entries", 45_000, () => computeMissingEntries());
+  return cached(`admin:missing-entries:${session.institutionId ?? "none"}`, 45_000, () =>
+    computeMissingEntries()
+  );
 }

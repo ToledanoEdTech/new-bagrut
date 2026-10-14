@@ -22,7 +22,7 @@ type AuthContextValue = {
   session: AuthSession | null;
   loading: boolean;
   configError: string | null;
-  signInWithGoogle: () => Promise<void>;
+  signInWithGoogle: (options?: { institutionId?: string; platform?: boolean }) => Promise<void>;
   signOut: () => Promise<void>;
 };
 
@@ -103,7 +103,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => unsub?.();
   }, [refreshSession]);
 
-  async function signInWithGoogle() {
+  async function signInWithGoogle(options?: { institutionId?: string; platform?: boolean }) {
     if (configError) {
       throw new Error(configError);
     }
@@ -112,7 +112,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const res = await fetch("/api/auth/session", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ idToken }),
+      body: JSON.stringify({
+        idToken,
+        institutionId: options?.institutionId,
+        platform: options?.platform === true,
+      }),
     });
     const data = await res.json();
     if (!res.ok) {

@@ -26,6 +26,23 @@ export async function requireAuth(): Promise<AuthResult> {
   if (!session) {
     return { error: NextResponse.json({ error: "לא מחובר" }, { status: 401 }), session: null };
   }
+  if (!session.institutionId) {
+    return {
+      error: NextResponse.json({ error: "אין הרשאה לנתוני המוסד" }, { status: 403 }),
+      session: null,
+    };
+  }
+  return { error: null, session };
+}
+
+export async function requirePlatformAdmin(): Promise<AuthResult> {
+  const session = await getAuthSession();
+  if (!session) {
+    return { error: NextResponse.json({ error: "לא מחובר" }, { status: 401 }), session: null };
+  }
+  if (!session.platformAdmin) {
+    return { error: NextResponse.json({ error: "אין הרשאה" }, { status: 403 }), session: null };
+  }
   return { error: null, session };
 }
 

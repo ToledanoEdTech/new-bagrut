@@ -393,7 +393,7 @@ export default function ProgramsPage() {
     <div className="mt-4">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-slate-500">
-          ערכו אילו מקצועות חובה נכללים בכל תוכנית, או צרו תוכנית חדשה.
+          בנו כאן את המסלולים של המוסד ובחרו אילו מקצועות חובה נכללים בכל אחד.
         </p>
         <Button onClick={openCreate}>
           <Plus className="h-4 w-4" />
@@ -405,7 +405,7 @@ export default function ProgramsPage() {
         <EmptyState
           icon={BookOpen}
           title="אין תוכניות"
-          description="צרו תוכנית חובה ראשונה כדי לשייך אליה כיתות"
+          description="צרו מסלול, למשל רגילה או בית מדרש, ובחרו את מקצועות החובה שלו. אחר כך אפשר לשייך אליו כיתות."
         />
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

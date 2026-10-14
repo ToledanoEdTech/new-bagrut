@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   createStudent,
+  getStudentByEmail,
   listClasses,
   listExamPaths,
   listTracks,
 } from "@/lib/firestore";
 import { requireAdmin } from "@/lib/api-auth";
-import { adminDb } from "@/lib/firebase/admin";
 import { parseImportWorkbook } from "@/lib/excel-import";
 
 const STUDENT_HEADER_HINTS = [
@@ -78,12 +78,8 @@ export async function POST(req: NextRequest) {
     }
 
     const normalizedEmail = email.toLowerCase().trim();
-    const existing = await adminDb
-      .collection("students")
-      .where("email", "==", normalizedEmail)
-      .limit(1)
-      .get();
-    if (!existing.empty) {
+    const existing = await getStudentByEmail(normalizedEmail);
+    if (existing) {
       skipped++;
       errors.push(`${name}: אימייל כבר קיים (${normalizedEmail})`);
       continue;

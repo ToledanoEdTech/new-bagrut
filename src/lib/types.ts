@@ -192,6 +192,10 @@ export interface AuthSession {
   role: Role;
   studentId: string | null;
   photoURL: string | null;
+  /** המוסד הפתוח. ריק כשמנהל המערכת במסך המוסדות. */
+  institutionId: string | null;
+  /** מנהל המערכת: מוסיף מוסדות ויכול להיכנס לכל אחד מהם. */
+  platformAdmin: boolean;
   /** undefined = הרשאות מלאות (מנהל). רק לצוות TEACHER */
   permissions?: StaffPermission[];
 }

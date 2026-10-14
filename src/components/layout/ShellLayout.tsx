@@ -5,7 +5,7 @@ import { Menu } from "lucide-react";
 import { KeepAlive } from "./KeepAlive";
 import { PageMetaProvider, usePageMeta } from "./PageMetaContext";
 import { Sidebar } from "./Sidebar";
-import { SiteLogos } from "@/components/ui/SiteLogos";
+import { SchoolMark } from "@/components/ui/SiteLogos";
 import type { Role } from "@/lib/types";
 
 function MobileHeader({ onOpenMenu }: { onOpenMenu: () => void }) {
@@ -21,7 +21,10 @@ function MobileHeader({ onOpenMenu }: { onOpenMenu: () => void }) {
       >
         <Menu className="h-5 w-5" />
       </button>
-      <div className="min-w-0 flex-1">
+      <div className="flex min-w-0 flex-1 items-center gap-3">
+        <span className="inline-flex shrink-0 rounded-lg bg-white p-1 ring-1 ring-slate-200">
+          <SchoolMark className="h-8 w-auto max-w-[4.5rem] object-contain" />
+        </span>
         {meta.title ? (
           <div className="min-w-0">
             <p className="truncate text-base font-bold text-slate-900">{meta.title}</p>
@@ -30,7 +33,7 @@ function MobileHeader({ onOpenMenu }: { onOpenMenu: () => void }) {
             )}
           </div>
         ) : (
-          <SiteLogos size="header" />
+          <p className="truncate text-sm font-bold text-slate-800">מערכת מעקב בגרות</p>
         )}
       </div>
       {!meta.title && <span className="sr-only">מערכת מעקב בגרות</span>}

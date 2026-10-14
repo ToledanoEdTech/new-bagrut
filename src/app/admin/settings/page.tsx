@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Alert } from "@/components/ui/Alert";
 import { useToast } from "@/components/ui/Toast";
+import { SchoolLogoSettings } from "@/components/settings/SchoolLogoSettings";
 import { invalidateCache } from "@/lib/api-cache";
 import type { GradeReminderSettings } from "@/lib/grade-reminders";
 import type { ResolvedBagrutEligibilitySettings } from "@/lib/bagrut-eligibility";
@@ -266,8 +267,10 @@ export default function SettingsPage() {
     <div className="space-y-6">
       <PageHeader
         title="הגדרות מערכת"
-        subtitle="תזכורות ציונים, זכאות לבגרות ועליית כיתות"
+        subtitle="מיתוג, תזכורות ציונים, זכאות לבגרות ועליית כיתות"
       />
+
+      <SchoolLogoSettings />
 
       {data && !data.smtpConfigured && (
         <Alert variant="warning">

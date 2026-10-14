@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Plus, Pencil, Trash2, Save, X, ChevronLeft, Users, GraduationCap } from "lucide-react";
 import { useApi } from "@/hooks/useApi";
@@ -62,6 +62,7 @@ export default function ClassesPage() {
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [showNew, setShowNew] = useState(false);
+  const defaultedNewPath = useRef(false);
   const [form, setForm] = useState({
     name: "",
     gradeYear: "",
@@ -96,6 +97,14 @@ export default function ClassesPage() {
   const selectedClass = classes.find((c) => c.id === selectedClassId);
   const selectedStudent = students.find((s) => s.id === selectedStudentId);
 
+  useEffect(() => {
+    if (!showNew || defaultedNewPath.current || paths.length === 0) return;
+    defaultedNewPath.current = true;
+    setForm((current) =>
+      current.examPathId ? current : { ...current, examPathId: paths[0].id }
+    );
+  }, [showNew, paths]);
+
   const classStudents = useMemo(() => {
     if (!selectedClassId) return [];
     return students
@@ -123,12 +132,33 @@ export default function ClassesPage() {
     }
   }
 
+  function openNewClass() {
+    setEditing(null);
+    defaultedNewPath.current = paths.length > 0;
+    setShowNew(true);
+    setForm({
+      name: "",
+      gradeYear: "",
+      examPathId: paths[0]?.id ?? "",
+      homeroomTeacherId: "",
+    });
+  }
+
   async function saveNew() {
-    await fetch("/api/classes", {
+    if (!form.name.trim()) {
+      toast.error("יש להזין שם כיתה");
+      return;
+    }
+    const res = await fetch("/api/classes", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(form),
     });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      toast.error(data.error ?? "לא ניתן ליצור את הכיתה");
+      return;
+    }
     setShowNew(false);
     setForm({ name: "", gradeYear: "", examPathId: paths[0]?.id ?? "", homeroomTeacherId: "" });
     toast.success("הכיתה נוצרה בהצלחה");
@@ -136,11 +166,20 @@ export default function ClassesPage() {
   }
 
   async function saveEdit(id: string) {
-    await fetch("/api/classes", {
+    if (!form.name.trim()) {
+      toast.error("יש להזין שם כיתה");
+      return;
+    }
+    const res = await fetch("/api/classes", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id, ...form }),
     });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      toast.error(data.error ?? "לא ניתן לשמור את הכיתה");
+      return;
+    }
     setEditing(null);
     toast.success("נשמר בהצלחה");
     load();
@@ -259,7 +298,7 @@ export default function ClassesPage() {
             </>
           )}
           {view === "classes" && (
-            <Button onClick={() => setShowNew(true)}>
+            <Button onClick={openNewClass}>
               <Plus className="h-4 w-4" />
               כיתה חדשה
             </Button>
@@ -427,12 +466,18 @@ export default function ClassesPage() {
                 value={form.examPathId}
                 onChange={(e) => setForm({ ...form, examPathId: e.target.value })}
               >
+                <option value="">ללא תוכנית</option>
                 {paths.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.label}
                   </option>
                 ))}
               </select>
+              {paths.length === 0 && (
+                <p className="mt-1 text-xs text-slate-500">
+                  במוסד הזה עדיין אין תוכנית. הכיתה תיווצר בלעדיה, ואפשר לשייך תוכנית אחר כך.
+                </p>
+              )}
             </div>
             <div>
               <label className="label">מחנך</label>
@@ -484,6 +529,7 @@ export default function ClassesPage() {
                   value={form.examPathId}
                   onChange={(e) => setForm({ ...form, examPathId: e.target.value })}
                 >
+                  <option value="">ללא תוכנית</option>
                   {paths.map((p) => (
                     <option key={p.id} value={p.id}>
                       {p.label}

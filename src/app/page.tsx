@@ -6,6 +6,7 @@ import { hasAnyGradeWrite } from "@/lib/permissions";
 export default async function Home() {
   const session = await getAuthSession();
   if (!session) redirect("/login");
+  if (session.platformAdmin && !session.institutionId) redirect("/admin/institutions");
   if (session.role === "TEACHER" && hasAnyGradeWrite(session)) {
     redirect("/admin/grades");
   }

@@ -10,9 +10,12 @@ import { useApi } from "@/hooks/useApi";
 import type { StudentDashboardData } from "@/components/students/StudentDashboardContent";
 import { OutstandingBagrutBadge } from "@/components/students/OutstandingBagrutBadge";
 import { HightechBagrutBadge } from "@/components/students/HightechBagrutBadge";
+import { useBranding } from "@/components/BrandingProvider";
+import { SchoolMark } from "@/components/ui/SiteLogos";
 
 export default function StudentDashboard() {
   const { data, loading } = useApi<StudentDashboardData>("/api/student/dashboard");
+  const { schoolName } = useBranding();
 
   useRegisterPageMeta({
     title: data ? `שלום, ${data.student.user.name}` : "הדשבורד שלי",
@@ -44,6 +47,12 @@ export default function StudentDashboard() {
       <div className="absolute -right-10 bottom-0 h-48 w-48 rounded-full bg-brand-400/20 blur-3xl" />
 
       <div className="relative">
+        <div className="mb-4 flex items-center gap-3">
+          <span className="inline-flex rounded-xl bg-white/95 p-1.5 shadow-soft">
+            <SchoolMark className="h-10 w-auto max-w-[9rem] object-contain" />
+          </span>
+          <p className="text-sm font-semibold text-primary-50">{schoolName}</p>
+        </div>
         <p className="text-base text-primary-100/90">שלום,</p>
         <div className="mt-0.5 flex flex-wrap items-center gap-3">
           <h1 className="text-4xl font-extrabold tracking-tight text-white drop-shadow-sm">

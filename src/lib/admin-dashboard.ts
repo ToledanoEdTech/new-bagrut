@@ -216,7 +216,7 @@ function withClass(student: Student, cls: Class): StudentWithRelations {
 
 function buildScopeCacheKey(session: AuthSession): string {
   const perms = session.permissions?.map((p) => JSON.stringify(p)).join("|") ?? "legacy";
-  return `${session.email}:${session.role}:${perms}`;
+  return `${session.institutionId ?? "none"}:${session.email}:${session.role}:${perms}`;
 }
 
 function filterStudentsForScope(

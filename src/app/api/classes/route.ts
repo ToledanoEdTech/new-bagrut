@@ -17,27 +17,53 @@ export async function POST(req: NextRequest) {
   const { error } = await requireAdmin();
   if (error) return error;
 
-  const { name, gradeYear, examPathId, homeroomTeacherId } = await req.json();
-  const cls = await createClass({
-    name,
-    gradeYear,
-    examPathId,
-    homeroomTeacherId: homeroomTeacherId || null,
-  });
-  return NextResponse.json(cls);
+  try {
+    const body = await req.json();
+    const cls = await createClass({
+      name: typeof body.name === "string" ? body.name : "",
+      gradeYear: typeof body.gradeYear === "string" ? body.gradeYear : null,
+      examPathId: typeof body.examPathId === "string" ? body.examPathId : "",
+      homeroomTeacherId:
+        typeof body.homeroomTeacherId === "string" && body.homeroomTeacherId
+          ? body.homeroomTeacherId
+          : null,
+    });
+    return NextResponse.json(cls);
+  } catch (e) {
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : "שגיאה" },
+      { status: 400 }
+    );
+  }
 }
 
 export async function PATCH(req: NextRequest) {
   const { error } = await requireAdmin();
   if (error) return error;
 
-  const { id, name, gradeYear, examPathId, homeroomTeacherId } = await req.json();
-  const patch: Parameters<typeof updateClass>[1] = { name, gradeYear, examPathId };
-  if (homeroomTeacherId !== undefined) {
-    patch.homeroomTeacherId = homeroomTeacherId || null;
+  try {
+    const body = await req.json();
+    const id = typeof body.id === "string" ? body.id : "";
+    if (!id) return NextResponse.json({ error: "חסר מזהה" }, { status: 400 });
+
+    const patch: Parameters<typeof updateClass>[1] = {};
+    if (typeof body.name === "string") patch.name = body.name;
+    if (typeof body.gradeYear === "string") patch.gradeYear = body.gradeYear || null;
+    if (typeof body.examPathId === "string") patch.examPathId = body.examPathId;
+    if (body.homeroomTeacherId !== undefined) {
+      patch.homeroomTeacherId =
+        typeof body.homeroomTeacherId === "string" && body.homeroomTeacherId
+          ? body.homeroomTeacherId
+          : null;
+    }
+    const cls = await updateClass(id, patch);
+    return NextResponse.json(cls);
+  } catch (e) {
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : "שגיאה" },
+      { status: 400 }
+    );
   }
-  const cls = await updateClass(id, patch);
-  return NextResponse.json(cls);
 }
 
 export async function DELETE(req: NextRequest) {

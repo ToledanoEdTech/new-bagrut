@@ -292,7 +292,7 @@ function buildPendingTasksCacheKey(
     session.role === "ADMIN"
       ? "admin"
       : `${session.uid}:${JSON.stringify(session.permissions ?? [])}`;
-  return `pending-tasks:${scope}:${JSON.stringify(filter)}`;
+  return `pending-tasks:${session.institutionId ?? "none"}:${scope}:${JSON.stringify(filter)}`;
 }
 
 export async function getPendingTasksForSession(

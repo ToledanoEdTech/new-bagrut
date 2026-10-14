@@ -29,8 +29,10 @@ import {
   FolderKanban,
   Grid3X3,
   History,
+  Landmark,
 } from "lucide-react";
 import { useAuth } from "@/components/AuthProvider";
+import { useBranding } from "@/components/BrandingProvider";
 import { SiteLogos } from "@/components/ui/SiteLogos";
 import type { Role } from "@/lib/types";
 import { canImportStudents, canManageStructure } from "@/lib/roles";
@@ -69,6 +71,7 @@ const managementLinks: NavLink[] = [
   { href: "/admin/obligations", label: "לוח מטלות וציונים", icon: CalendarDays },
   { href: "/admin/import", label: "ייבוא תלמידים", icon: Upload },
   { href: "/admin/staff", label: "צוות והרשאות", icon: UserCog },
+  { href: "/admin/institutions", label: "מוסדות חינוך", icon: Landmark },
   { href: "/admin/settings", label: "הגדרות מערכת", icon: Bell },
 ];
 
@@ -231,14 +234,20 @@ export function Sidebar({
 }) {
   const pathname = usePathname();
   const { signOut, session } = useAuth();
+  const platformAdmin = Boolean(session?.platformAdmin);
+  const catalogOnly = platformAdmin && !session?.institutionId;
 
   const studentLinks: NavLink[] =
-    role === "STUDENT"
+    catalogOnly
+      ? []
+      : role === "STUDENT"
       ? [{ href: "/student", label: "הדשבורד שלי", icon: GraduationCap, exact: true }]
       : [];
 
   const filteredPrimary =
-    role === "STUDENT"
+    catalogOnly
+      ? []
+      : role === "STUDENT"
       ? []
       : primaryLinks.filter((l) => {
           if (l.href === "/admin/grades" && session && !hasAnyGradeWrite(session)) return false;
@@ -249,7 +258,9 @@ export function Sidebar({
         });
 
   const filteredBagrut =
-    role === "STUDENT"
+    catalogOnly
+      ? []
+      : role === "STUDENT"
       ? []
       : bagrutProgramLinks.filter((l) => {
           if (session && !hasAnyStudentView(session)) return false;
@@ -258,7 +269,9 @@ export function Sidebar({
         });
 
   const filteredReports =
-    role === "STUDENT"
+    catalogOnly
+      ? []
+      : role === "STUDENT"
       ? []
       : reportsLinks.filter((l) => {
           if (l.href === "/admin/missing-entries" && role !== "ADMIN") return false;
@@ -274,9 +287,12 @@ export function Sidebar({
         });
 
   const filteredManagement =
-    role === "STUDENT" || role === "TEACHER"
+    catalogOnly
+      ? managementLinks.filter((l) => l.href === "/admin/institutions")
+      : role === "STUDENT" || role === "TEACHER"
       ? []
       : managementLinks.filter((l) => {
+          if (l.href === "/admin/institutions") return platformAdmin;
           if (l.href === "/admin/import" && session && !canImportStudents(role)) return false;
           if (
             (l.href === "/admin/classes" ||
@@ -285,7 +301,11 @@ export function Sidebar({
             !canManageStructure(role)
           )
             return false;
-          if (l.href === "/admin/settings" && role !== "ADMIN") return false;
+          if (
+            (l.href === "/admin/settings" || l.href === "/admin/institutions") &&
+            role !== "ADMIN"
+          )
+            return false;
           return true;
         });
 
@@ -307,8 +327,14 @@ export function Sidebar({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname]);
 
-  const roleLabel =
-    role === "ADMIN" ? "מנהל" : role === "TEACHER" ? "מורה" : "תלמיד";
+  const { schoolName } = useBranding();
+  const roleLabel = platformAdmin
+    ? "מנהל מערכת"
+    : role === "ADMIN"
+      ? "מנהל"
+      : role === "TEACHER"
+        ? "מורה"
+        : "תלמיד";
 
   return (
     <aside
@@ -321,9 +347,7 @@ export function Sidebar({
         <div className="absolute inset-0 bg-gradient-to-l from-primary-50/80 via-white to-slate-50" />
         <div className="relative min-w-0 flex-1">
           <SiteLogos size="header" className="min-w-0" />
-          <p className="mt-1 truncate text-[11px] font-medium text-slate-500">
-            ישיבה תיכונית צביה אלישיב
-          </p>
+          <p className="mt-1 truncate text-[11px] font-medium text-slate-500">{schoolName}</p>
         </div>
         <button
           type="button"

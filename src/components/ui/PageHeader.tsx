@@ -3,6 +3,8 @@
 import clsx from "clsx";
 import { useEffect, type ReactNode } from "react";
 import { usePageMeta } from "@/components/layout/PageMetaContext";
+import { useBranding } from "@/components/BrandingProvider";
+import { SchoolMark } from "./SiteLogos";
 import { Breadcrumb, type BreadcrumbItem } from "./Breadcrumb";
 
 type PageHeaderProps = {
@@ -23,6 +25,7 @@ export function PageHeader({
   breadcrumb,
 }: PageHeaderProps) {
   const { setMeta } = usePageMeta();
+  const { schoolName } = useBranding();
 
   useEffect(() => {
     setMeta({ title, subtitle });
@@ -41,9 +44,14 @@ export function PageHeader({
         <div className="absolute inset-0 bg-mesh-hero opacity-50" />
         <div className="absolute -left-16 -top-16 h-56 w-56 rounded-full bg-white/10 blur-3xl" />
         <div className="relative">
-          <p className="mb-2 text-xs font-semibold tracking-wide text-primary-100/80">
-            ישיבה תיכונית צביה אלישיב · מערכת מעקב בגרות
-          </p>
+          <div className="mb-3 flex items-center gap-3">
+            <span className="inline-flex rounded-xl bg-white/95 p-1.5 shadow-soft">
+              <SchoolMark className="h-10 w-auto max-w-[9rem] object-contain" />
+            </span>
+            <p className="text-xs font-semibold tracking-wide text-primary-100/80">
+              {schoolName} · מערכת מעקב בגרות
+            </p>
+          </div>
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div>
               <h1 className="text-4xl font-extrabold tracking-tight text-white drop-shadow-sm">
@@ -73,9 +81,7 @@ export function PageHeader({
           className
         )}
       >
-        <p className="mb-1.5 text-xs font-semibold tracking-wide text-slate-400">
-          ישיבה תיכונית צביה אלישיב
-        </p>
+        <p className="mb-1.5 text-xs font-semibold tracking-wide text-slate-400">{schoolName}</p>
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
             <h1 className="text-h1 text-slate-900">{title}</h1>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/components/AuthProvider";
 import { PageLoader } from "@/components/ui/PageLoader";
 import { AppShell } from "./AppShell";
@@ -16,14 +16,23 @@ export function RoleShell({
 }) {
   const { session, loading } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
   const isAllowed = session ? allowedRoles.includes(session.role) : false;
 
   useEffect(() => {
     if (loading) return;
     if (!session || !allowedRoles.includes(session.role)) {
       router.replace("/login");
+      return;
     }
-  }, [loading, session, allowedRoles, router]);
+    if (
+      session.platformAdmin &&
+      !session.institutionId &&
+      !pathname.startsWith("/admin/institutions")
+    ) {
+      router.replace("/admin/institutions");
+    }
+  }, [loading, session, allowedRoles, router, pathname]);
 
   if (loading || !session || !isAllowed) {
     return <PageLoader />;

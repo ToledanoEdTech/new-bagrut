@@ -5,6 +5,7 @@ import { requireAdmin } from "@/lib/api-auth";
 import { listStaff } from "@/lib/firestore";
 import { isAdminEmail } from "@/lib/roles";
 import { invalidateServerCache } from "@/lib/server-cache";
+import { belongsToInstitution, currentInstitutionId } from "@/lib/institution-scope";
 import { actorFromSession, recordActivity } from "@/lib/activity-log";
 import type { StaffPermission, StaffRole } from "@/lib/types";
 
@@ -14,8 +15,8 @@ function normalizePermissions(permissions: unknown): StaffPermission[] | undefin
 }
 
 async function countStaffAdmins(): Promise<number> {
-  const snap = await adminDb.collection("staff").where("role", "==", "ADMIN").get();
-  return snap.size;
+  const staff = await listStaff();
+  return staff.filter((member) => member.role === "ADMIN").length;
 }
 
 export async function GET() {
@@ -52,14 +53,10 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const existing = await adminDb
-    .collection("staff")
-    .where("email", "==", normalized)
-    .limit(1)
-    .get();
-
-  if (!existing.empty) {
-    return NextResponse.json({ error: "משתמש צוות כבר קיים" }, { status: 400 });
+  const institutionId = await currentInstitutionId();
+  const existing = await adminDb.collection("staff").where("email", "==", normalized).get();
+  if (existing.docs.some((doc) => belongsToInstitution(doc.data(), institutionId))) {
+    return NextResponse.json({ error: "משתמש צוות כבר קיים במוסד הזה" }, { status: 400 });
   }
 
   const now = new Date().toISOString();
@@ -67,6 +64,7 @@ export async function POST(req: NextRequest) {
     email: normalized,
     name: name ?? normalized,
     role: staffRole,
+    institutionId,
     createdAt: now,
   };
   if (staffPermissions) {
@@ -116,7 +114,12 @@ export async function PATCH(req: NextRequest) {
     email: string;
     role: StaffRole;
     name: string;
+    institutionId?: string;
   };
+
+  if (!belongsToInstitution(existing, await currentInstitutionId())) {
+    return NextResponse.json({ error: "לא נמצא" }, { status: 404 });
+  }
 
   if (isAdminEmail(existing.email)) {
     return NextResponse.json(
@@ -207,7 +210,11 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: "לא נמצא" }, { status: 404 });
   }
 
-  const data = snap.data() as { email: string; role: StaffRole };
+  const data = snap.data() as { email: string; role: StaffRole; institutionId?: string };
+
+  if (!belongsToInstitution(data, await currentInstitutionId())) {
+    return NextResponse.json({ error: "לא נמצא" }, { status: 404 });
+  }
 
   if (isAdminEmail(data.email)) {
     return NextResponse.json(

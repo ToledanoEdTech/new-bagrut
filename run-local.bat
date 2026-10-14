@@ -1,9 +1,11 @@
 @echo off
 cd /d "%~dp0"
 
-REM Keep this launcher ASCII-only so Windows can run it even if the
-REM console is not set to UTF-8. The PowerShell script does the real work.
+REM Double-click this file to open the site locally.
+REM ASCII only: Windows runs this before the console is UTF-8.
+REM The PowerShell script does the real work.
 set "PATH=C:\Program Files\nodejs;C:\Program Files (x86)\nodejs;%APPDATA%\npm;%PATH%"
+title Bagrut - local
 
 where powershell >nul 2>&1
 if errorlevel 1 (

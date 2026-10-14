@@ -9,6 +9,7 @@ import {
   listTracks,
 } from "@/lib/firestore";
 import { cached } from "@/lib/server-cache";
+import { currentInstitutionId, ensureInstitutionMigration } from "@/lib/institution-scope";
 import type {
   Grade,
   ObligationClassGradeYearOverride,
@@ -39,7 +40,9 @@ export type SchoolSnapshot = {
  * full Firestore scans when several heavy APIs run close together.
  */
 export async function loadSchoolSnapshot(): Promise<SchoolSnapshot> {
-  return cached(SCHOOL_SNAPSHOT_KEY, SNAPSHOT_TTL_MS, async () => {
+  await ensureInstitutionMigration();
+  const institutionId = await currentInstitutionId();
+  return cached(`${SCHOOL_SNAPSHOT_KEY}:${institutionId}`, SNAPSHOT_TTL_MS, async () => {
     const [subjects, students, classes, examPaths, tracks, grades, staff, obligationGradeYearOverrides] =
       await Promise.all([
         listSubjects(),

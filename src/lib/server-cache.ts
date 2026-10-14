@@ -101,8 +101,8 @@ function clearLocalByPrefix(prefix?: string) {
 
   const root = prefix.split(":")[0]!;
   if (SCHOOL_DATA_PREFIXES.has(root)) {
-    cache.delete(SCHOOL_SNAPSHOT_KEY);
-    inflight.delete(SCHOOL_SNAPSHOT_KEY);
+    deleteByPrefix(cache as Map<string, unknown>, SCHOOL_SNAPSHOT_KEY);
+    deleteByPrefix(inflight as Map<string, unknown>, SCHOOL_SNAPSHOT_KEY);
     deleteByPrefix(cache as Map<string, unknown>, "pending-tasks");
     deleteByPrefix(inflight as Map<string, unknown>, "pending-tasks");
     deleteByPrefix(cache as Map<string, unknown>, "admin");

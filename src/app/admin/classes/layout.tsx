@@ -14,7 +14,7 @@ export default function ClassesLayout({ children }: { children: React.ReactNode 
     <>
       <PageHeader
         title="כיתות ותוכניות"
-        subtitle='ניהול כיתות ותוכניות חובה (רגילה, בית מדרש, מב"ר/חנ"מ ועוד)'
+        subtitle="כל מוסד בונה כאן את המסלולים שלו מתוך המקצועות, למשל רגילה, בית מדרש או מב״ר"
       />
       <div className="mt-6">
         <Tabs tabs={TABS} />

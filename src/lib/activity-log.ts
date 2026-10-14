@@ -1,5 +1,6 @@
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { adminDb } from "@/lib/firebase/admin";
+import { currentInstitutionId } from "@/lib/institution-scope";
 import type { AuthSession } from "@/lib/types";
 import type {
   ActivityActor,
@@ -54,11 +55,18 @@ function serializeAt(value: unknown): string {
 export async function recordActivity(input: ActivityEventInput): Promise<void> {
   try {
     const id = newId();
+    let institutionId: string | null = null;
+    try {
+      institutionId = await currentInstitutionId();
+    } catch {
+      institutionId = null;
+    }
     await adminDb
       .collection("activityLog")
       .doc(id)
       .set({
         id,
+        institutionId,
         at: FieldValue.serverTimestamp(),
         actorUid: input.actor.uid,
         actorEmail: input.actor.email,
@@ -81,14 +89,10 @@ export async function listActivityEvents(options?: {
 }): Promise<ActivityEvent[]> {
   const limit = Math.min(Math.max(options?.limit ?? 80, 1), 200);
   const category = options?.category ?? null;
-
-  // Fetch a bit more when filtering in-memory so category chips stay useful
-  const fetchLimit = category ? Math.min(limit * 3, 300) : limit;
-
+  const institutionId = await currentInstitutionId();
   const snap = await adminDb
     .collection("activityLog")
-    .orderBy("at", "desc")
-    .limit(fetchLimit)
+    .where("institutionId", "==", institutionId)
     .get();
 
   const events = snap.docs.map((doc) => {
@@ -111,9 +115,9 @@ export async function listActivityEvents(options?: {
     };
   });
 
-  const filtered = category
-    ? events.filter((e) => e.category === category)
-    : events;
+  const filtered = (category ? events.filter((e) => e.category === category) : events).sort((a, b) =>
+    a.at < b.at ? 1 : -1
+  );
 
   return filtered.slice(0, limit);
 }

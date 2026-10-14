@@ -15,13 +15,17 @@ export type ActivityAction =
   | "obligation.gradeYearOverride.delete"
   | "staff.create"
   | "staff.update"
-  | "staff.delete";
+  | "staff.delete"
+  | "institution.create"
+  | "institution.update"
+  | "institution.delete";
 
 export type ActivityEntityType =
   | "grade"
   | "subject"
   | "obligation"
   | "staff"
+  | "institution"
   | "system";
 
 export type ActivityActor = {

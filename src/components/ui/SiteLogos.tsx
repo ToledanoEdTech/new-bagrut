@@ -1,5 +1,8 @@
+"use client";
+
 import Image from "next/image";
 import clsx from "clsx";
+import { useBranding } from "@/components/BrandingProvider";
 
 const LOGO_1 = {
   src: "/logos/logo-1.png",
@@ -8,12 +11,18 @@ const LOGO_1 = {
   height: 768,
 };
 
-const LOGO_2 = {
-  src: "/logos/logo-2.png",
-  alt: "ישיבה תיכונית צביה אלישיב",
-  width: 1920,
-  height: 1080,
-};
+export function SchoolMark({
+  className,
+}: {
+  className?: string;
+  priority?: boolean;
+}) {
+  const { schoolName, schoolLogoUrl } = useBranding();
+
+  if (!schoolLogoUrl) return null;
+
+  return <img src={schoolLogoUrl} alt={schoolName} className={className} />;
+}
 
 export function SiteLogos({
   size = "header",
@@ -53,21 +62,22 @@ export function SiteLogos({
           alt={LOGO_1.alt}
           width={LOGO_1.width}
           height={LOGO_1.height}
-          className={clsx(isHero ? "h-24 w-auto" : "h-8 w-auto")}
+          className={clsx(
+            "w-auto object-contain",
+            isHero ? "h-24" : "h-8 max-w-[7.5rem]"
+          )}
           priority={isHero}
         />
       )}
-      <Image
-        src={LOGO_2.src}
-        alt={LOGO_2.alt}
-        width={LOGO_2.width}
-        height={LOGO_2.height}
-        className={clsx(
-          isHero && "h-20 w-auto rounded-xl bg-white p-2",
-          isLogin && "h-20 w-auto rounded-xl bg-white p-2 shadow-card ring-1 ring-slate-200/60 sm:h-24",
-          !isHero && !isLogin && "h-8 w-auto"
-        )}
+      <SchoolMark
         priority={isHero || isLogin}
+        className={clsx(
+          "w-auto object-contain",
+          isHero && "h-20 rounded-xl bg-white p-2",
+          isLogin &&
+            "h-20 max-w-[15rem] rounded-2xl bg-white p-2 shadow-[0_18px_50px_-24px_rgba(0,0,0,0.65)] ring-1 ring-white/70 sm:h-24",
+          !isHero && !isLogin && "h-8 max-w-[9rem]"
+        )}
       />
       {isLogin && showPartner && (
         <Image

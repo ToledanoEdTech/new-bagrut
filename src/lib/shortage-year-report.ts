@@ -459,7 +459,7 @@ function buildCacheKey(session: AuthSession, filter: ShortageYearFilter): string
     session.role === "ADMIN"
       ? "admin"
       : `${session.uid}:${JSON.stringify(session.permissions ?? [])}`;
-  return `shortage-year:${scope}:${JSON.stringify(filter)}`;
+  return `shortage-year:${session.institutionId ?? "none"}:${scope}:${JSON.stringify(filter)}`;
 }
 
 export async function getShortageYearReportForSession(

@@ -16,9 +16,13 @@ import type {
   Track,
   UserProfile,
 } from "@/lib/types";
-import { isAdminEmail } from "@/lib/roles";
 import { LEGACY_TEACHER_PERMISSIONS } from "@/lib/permissions";
 import { shouldDeleteEmptyGrade } from "@/lib/grade-status";
+import {
+  belongsToInstitution,
+  currentInstitutionId,
+  ensureInstitutionMigration,
+} from "@/lib/institution-scope";
 import { FieldValue } from "firebase-admin/firestore";
 
 // ─── helpers ───────────────────────────────────────────────────────────────
@@ -26,6 +30,38 @@ import { FieldValue } from "firebase-admin/firestore";
 function docData<T>(snap: FirebaseFirestore.DocumentSnapshot): T | null {
   if (!snap.exists) return null;
   return { id: snap.id, ...snap.data() } as T;
+}
+
+async function activeInstitutionId(): Promise<string> {
+  await ensureInstitutionMigration();
+  return currentInstitutionId();
+}
+
+async function scopedCacheKey(base: string): Promise<string> {
+  return `${base}:${await activeInstitutionId()}`;
+}
+
+async function scopedCollection(name: string): Promise<FirebaseFirestore.QuerySnapshot> {
+  const institutionId = await activeInstitutionId();
+  return adminDb.collection(name).where("institutionId", "==", institutionId).get();
+}
+
+async function readOwned<T extends { id: string }>(name: string, id: string): Promise<T | null> {
+  const institutionId = await activeInstitutionId();
+  const snap = await adminDb.collection(name).doc(id).get();
+  if (!snap.exists) return null;
+  const data = { id: snap.id, ...snap.data() } as T;
+  if (!belongsToInstitution(data, institutionId)) return null;
+  return data;
+}
+
+async function requireOwned(name: string, id: string): Promise<void> {
+  const record = await readOwned(name, id);
+  if (!record) throw new Error("לא נמצא במוסד הזה");
+}
+
+function matchesInstitution(data: object, institutionId: string): boolean {
+  return belongsToInstitution(data, institutionId);
 }
 
 function docsData<T>(snaps: FirebaseFirestore.QuerySnapshot): T[] {
@@ -97,30 +133,79 @@ export async function isStaffEmail(email: string): Promise<boolean> {
   return staff !== null;
 }
 
+export async function findStaffInInstitution(
+  email: string,
+  institutionId: string
+): Promise<StaffRecord | null> {
+  const normalized = email.toLowerCase().trim();
+  const snap = await adminDb.collection("staff").where("email", "==", normalized).get();
+  const match = snap.docs.find((doc) => matchesInstitution(doc.data(), institutionId));
+  if (!match) return null;
+  return { id: match.id, ...match.data() } as StaffRecord;
+}
+
+export async function findStudentInInstitution(
+  email: string,
+  institutionId: string
+): Promise<Student | null> {
+  const normalized = email.toLowerCase().trim();
+  const snap = await adminDb.collection("students").where("email", "==", normalized).get();
+  const match = snap.docs.find((doc) => matchesInstitution(doc.data(), institutionId));
+  if (!match) return null;
+  return normalizeStudent({ id: match.id, ...match.data() } as Student);
+}
+
+export async function resolveMembership(
+  email: string,
+  institutionId: string
+): Promise<{
+  role: Role;
+  studentId: string | null;
+  name: string;
+  permissions?: StaffPermission[];
+} | null> {
+  await ensureInstitutionMigration();
+  const normalized = email.toLowerCase().trim();
+  const staff = await findStaffInInstitution(normalized, institutionId);
+  if (staff) {
+    if (staff.role === "ADMIN") {
+      return { role: "ADMIN", studentId: null, name: staff.name };
+    }
+    return {
+      role: "TEACHER",
+      studentId: null,
+      name: staff.name,
+      permissions: resolveStaffPermissions(staff),
+    };
+  }
+
+  const student = await findStudentInInstitution(normalized, institutionId);
+  if (student) {
+    return { role: "STUDENT", studentId: student.id, name: student.name };
+  }
+  return null;
+}
+
 export async function getStaffByEmail(email: string): Promise<StaffRecord | null> {
   const normalized = email.toLowerCase().trim();
-  return cached(`staff:email:${normalized}`, 120_000, async () => {
-    const snap = await adminDb
-      .collection("staff")
-      .where("email", "==", normalized)
-      .limit(1)
-      .get();
-    if (snap.empty) return null;
-    const doc = snap.docs[0]!;
-    return { id: doc.id, ...doc.data() } as StaffRecord;
-  });
+  const institutionId = await activeInstitutionId();
+  return cached(`staff:email:${institutionId}:${normalized}`, 120_000, async () =>
+    findStaffInInstitution(normalized, institutionId)
+  );
 }
 
 export async function listStaff(): Promise<StaffRecord[]> {
-  return cached("staff", 120_000, async () => {
-    const snap = await adminDb.collection("staff").orderBy("email").get();
-    return docsData<StaffRecord>(snap);
+  const key = await scopedCacheKey("staff");
+  return cached(key, 120_000, async () => {
+    const snap = await scopedCollection("staff");
+    return docsData<StaffRecord>(snap).sort((a, b) => a.email.localeCompare(b.email));
   });
 }
 
 export async function listAllGrades(): Promise<Grade[]> {
-  return cached("grades", 60_000, async () => {
-    const snap = await adminDb.collection("grades").get();
+  const key = await scopedCacheKey("grades");
+  return cached(key, 60_000, async () => {
+    const snap = await scopedCollection("grades");
     return docsData<Grade>(snap);
   });
 }
@@ -140,25 +225,13 @@ export async function resolveUserRole(email: string): Promise<{
   studentId: string | null;
   permissions?: StaffPermission[];
 }> {
-  const normalized = email.toLowerCase().trim();
-  if (isAdminEmail(normalized)) return { role: "ADMIN", studentId: null };
-
-  const student = await getStudentByEmail(normalized);
-  if (student) return { role: "STUDENT", studentId: student.id };
-
-  const staff = await getStaffByEmail(normalized);
-  if (staff) {
-    if (staff.role === "ADMIN") {
-      return { role: "ADMIN", studentId: null };
-    }
-    return {
-      role: "TEACHER",
-      studentId: null,
-      permissions: resolveStaffPermissions(staff),
-    };
-  }
-
-  return { role: null, studentId: null };
+  const membership = await resolveMembership(email, await activeInstitutionId());
+  if (!membership) return { role: null, studentId: null };
+  return {
+    role: membership.role,
+    studentId: membership.studentId,
+    permissions: membership.permissions,
+  };
 }
 
 export async function getUserProfile(uid: string): Promise<UserProfile | null> {
@@ -173,27 +246,16 @@ export async function getOrCreateUserProfile(input: {
 }): Promise<UserProfile> {
   const ref = adminDb.collection("users").doc(input.uid);
   const snap = await ref.get();
-  const resolved = await resolveUserRole(input.email);
 
   if (snap.exists) {
     const data = snap.data() as UserProfile;
-    const role = isAdminEmail(input.email) ? "ADMIN" : (resolved.role ?? data.role);
-    const studentId = role === "STUDENT" ? resolved.studentId : null;
-
     await ref.update({
       name: input.name,
       photoURL: input.photoURL,
       email: input.email,
-      role,
-      studentId,
       updatedAt: FieldValue.serverTimestamp(),
     });
-
-    if (resolved.studentId) {
-      await adminDb.collection("students").doc(resolved.studentId).update({ uid: input.uid });
-    }
-
-    return { ...data, uid: input.uid, name: input.name, photoURL: input.photoURL, role, studentId };
+    return { ...data, uid: input.uid, name: input.name, photoURL: input.photoURL, email: input.email };
   }
 
   const profile: UserProfile = {
@@ -201,16 +263,11 @@ export async function getOrCreateUserProfile(input: {
     email: input.email,
     name: input.name,
     photoURL: input.photoURL,
-    role: resolved.role ?? "STUDENT",
-    studentId: resolved.studentId,
+    role: "STUDENT",
+    studentId: null,
   };
 
   await ref.set({ ...profile, createdAt: FieldValue.serverTimestamp() });
-
-  if (resolved.studentId) {
-    await adminDb.collection("students").doc(resolved.studentId).update({ uid: input.uid });
-  }
-
   return profile;
 }
 
@@ -221,27 +278,28 @@ export async function setUserRole(uid: string, role: Role) {
 // ─── students ──────────────────────────────────────────────────────────────
 
 export async function getStudentByEmail(email: string): Promise<Student | null> {
-  const snap = await adminDb
-    .collection("students")
-    .where("email", "==", email.toLowerCase().trim())
-    .limit(1)
-    .get();
-  return snap.empty ? null : normalizeStudent(docData<Student>(snap.docs[0]!)!);
+  return findStudentInInstitution(email, await activeInstitutionId());
 }
 
 export async function getStudentById(id: string): Promise<Student | null> {
-  const student = docData<Student>(await adminDb.collection("students").doc(id).get());
+  const student = await readOwned<Student>("students", id);
   return student ? normalizeStudent(student) : null;
 }
 
 export async function listStudents(): Promise<Student[]> {
-  return cached("students", 60_000, async () => {
-    const snap = await adminDb.collection("students").orderBy("name").get();
-    return docsData<Student>(snap).map(normalizeStudent);
+  const key = await scopedCacheKey("students");
+  return cached(key, 60_000, async () => {
+    const snap = await scopedCollection("students");
+    return docsData<Student>(snap)
+      .map(normalizeStudent)
+      .sort((a, b) => a.name.localeCompare(b.name, "he"));
   });
 }
 
 export async function createStudent(data: Omit<Student, "id" | "uid">) {
+  const cls = await getClassById(data.classId);
+  if (!cls) throw new Error("הכיתה לא נמצאה במוסד הזה");
+  const institution = await activeInstitutionId();
   const id = newId();
   const trackIds = getStudentTrackIds(data);
   const student: Student = {
@@ -260,6 +318,7 @@ export async function createStudent(data: Omit<Student, "id" | "uid">) {
   };
   await adminDb.collection("students").doc(id).set({
     ...student,
+    institutionId: institution,
     createdAt: FieldValue.serverTimestamp(),
   });
   await invalidateServerCache("students");
@@ -277,6 +336,11 @@ export async function updateStudent(
   if (data.mandatorySubjectIds === null) {
     updates.mandatorySubjectIds = FieldValue.delete();
   }
+  await requireOwned("students", id);
+  if (data.classId) {
+    const cls = await getClassById(data.classId);
+    if (!cls) throw new Error("הכיתה לא נמצאה במוסד הזה");
+  }
   if (data.email) updates.email = data.email.toLowerCase().trim();
   if (data.trackIds !== undefined) {
     updates.trackIds = data.trackIds;
@@ -288,6 +352,7 @@ export async function updateStudent(
 }
 
 export async function deleteStudent(id: string) {
+  await requireOwned("students", id);
   const grades = await adminDb.collection("grades").where("studentId", "==", id).get();
   const batch = adminDb.batch();
   grades.docs.forEach((d) => batch.delete(d.ref));
@@ -328,21 +393,11 @@ function enrichStudentFromLookup(student: Student, lookup: EnrichLookup) {
 
 export async function enrichStudent(student: Student) {
   const trackIds = getStudentTrackIds(student);
-  const [classesSnap, trackSnaps, pathsSnap] = await Promise.all([
-    adminDb.collection("classes").doc(student.classId).get(),
-    Promise.all(trackIds.map((id) => adminDb.collection("tracks").doc(id).get())),
-    adminDb.collection("classes").doc(student.classId).get().then(async (clsSnap) => {
-      if (!clsSnap.exists) return null;
-      const examPathId = (clsSnap.data() as Class).examPathId;
-      return adminDb.collection("examPaths").doc(examPathId).get();
-    }),
-  ]);
-
-  const cls = classesSnap.exists ? docData<Class>(classesSnap) : null;
-  const tracks = trackSnaps
-    .filter((snap) => snap.exists)
-    .map((snap) => docData<Track>(snap)!);
-  const examPath = pathsSnap?.exists ? docData<ExamPath>(pathsSnap) : null;
+  const cls = await readOwned<Class>("classes", student.classId);
+  const tracks = (
+    await Promise.all(trackIds.map((id) => readOwned<Track>("tracks", id)))
+  ).filter((track): track is Track => track !== null);
+  const examPath = cls ? await readOwned<ExamPath>("examPaths", cls.examPathId) : null;
 
   return enrichStudentFromLookup(student, {
     classes: cls ? new Map([[cls.id, cls]]) : new Map(),
@@ -352,12 +407,13 @@ export async function enrichStudent(student: Student) {
 }
 
 export async function listStudentsEnriched() {
-  return cached("students:enriched", 60_000, async () => {
+  const key = await scopedCacheKey("students:enriched");
+  return cached(key, 60_000, async () => {
     const [students, classesSnap, tracksSnap, pathsSnap] = await Promise.all([
       listStudents(),
-      adminDb.collection("classes").get(),
-      adminDb.collection("tracks").get(),
-      adminDb.collection("examPaths").get(),
+      scopedCollection("classes"),
+      scopedCollection("tracks"),
+      scopedCollection("examPaths"),
     ]);
 
     const lookup: EnrichLookup = {
@@ -373,20 +429,22 @@ export async function listStudentsEnriched() {
 // ─── classes ───────────────────────────────────────────────────────────────
 
 export async function getClassById(id: string): Promise<Class | null> {
-  return docData<Class>(await adminDb.collection("classes").doc(id).get());
+  return readOwned<Class>("classes", id);
 }
 
 export async function listClasses() {
-  return cached("classes", 60_000, async () => {
-    // Reuse cached students/paths/staff so a cache miss only scans `classes`.
+  const key = await scopedCacheKey("classes");
+  return cached(key, 60_000, async () => {
     const [classesSnap, students, examPaths, staff] = await Promise.all([
-      adminDb.collection("classes").orderBy("name").get(),
+      scopedCollection("classes"),
       listStudents(),
       listExamPaths(),
       listStaff(),
     ]);
 
-    const classes = docsData<Class>(classesSnap);
+    const classes = docsData<Class>(classesSnap).sort((a, b) =>
+      a.name.localeCompare(b.name, "he")
+    );
     const examPathsById = new Map<string, ExamPath>(
       examPaths.map((p) => {
         const { _count: _ignored, ...path } = p;
@@ -419,16 +477,45 @@ export async function listClasses() {
 }
 
 export async function createClass(data: Omit<Class, "id">) {
+  const name = data.name?.trim() ?? "";
+  if (!name) throw new Error("יש להזין שם כיתה");
+  const examPathId = data.examPathId?.trim() ?? "";
+  const path = examPathId ? await getExamPathById(examPathId) : null;
+  if (examPathId && !path) throw new Error("תוכנית הבחינות לא נמצאה במוסד הזה");
+  const institution = await activeInstitutionId();
   const id = newId();
-  await adminDb.collection("classes").doc(id).set({ id, ...data, createdAt: FieldValue.serverTimestamp() });
+  const gradeYear = data.gradeYear?.trim() ? data.gradeYear.trim() : null;
+  const homeroomTeacherId = data.homeroomTeacherId || null;
+  await adminDb.collection("classes").doc(id).set({
+    id,
+    name,
+    gradeYear,
+    examPathId,
+    homeroomTeacherId,
+    institutionId: institution,
+    createdAt: FieldValue.serverTimestamp(),
+  });
   await invalidateServerCache("examPaths");
   await invalidateServerCache("classes");
-  const examPath = await getExamPathById(data.examPathId);
   const homeroomTeacher: { id: string; name: string; email: string } | null = null;
-  return { id, ...data, examPath, homeroomTeacher, _count: { students: 0 } };
+  return {
+    id,
+    name,
+    gradeYear,
+    examPathId,
+    homeroomTeacherId,
+    examPath: path,
+    homeroomTeacher,
+    _count: { students: 0 },
+  };
 }
 
 export async function updateClass(id: string, data: Partial<Omit<Class, "id">>) {
+  await requireOwned("classes", id);
+  if (data.examPathId) {
+    const path = await getExamPathById(data.examPathId);
+    if (!path) throw new Error("תוכנית הבחינות לא נמצאה במוסד הזה");
+  }
   await adminDb.collection("classes").doc(id).update({ ...data, updatedAt: FieldValue.serverTimestamp() });
   await invalidateServerCache("examPaths");
   await invalidateServerCache("classes");
@@ -443,6 +530,7 @@ export async function updateClass(id: string, data: Partial<Omit<Class, "id">>) 
 }
 
 export async function deleteClass(id: string) {
+  await requireOwned("classes", id);
   const students = await listStudents();
   if (students.some((s) => s.classId === id)) {
     throw new Error("לא ניתן למחוק כיתה עם תלמידים");
@@ -455,17 +543,21 @@ export async function deleteClass(id: string) {
 // ─── exam paths ────────────────────────────────────────────────────────────
 
 export async function getExamPathById(id: string): Promise<ExamPath | null> {
-  return docData<ExamPath>(await adminDb.collection("examPaths").doc(id).get());
+  if (!id) return null;
+  return readOwned<ExamPath>("examPaths", id);
 }
 
 export async function listExamPaths() {
-  return cached("examPaths", 600_000, async () => {
+  const key = await scopedCacheKey("examPaths");
+  return cached(key, 600_000, async () => {
     const [pathsSnap, classesSnap] = await Promise.all([
-      adminDb.collection("examPaths").orderBy("label").get(),
-      adminDb.collection("classes").get(),
+      scopedCollection("examPaths"),
+      scopedCollection("classes"),
     ]);
 
-    const paths = docsData<ExamPath>(pathsSnap).filter((p) => p.key !== "flexible");
+    const paths = docsData<ExamPath>(pathsSnap)
+      .filter((p) => p.key !== "flexible")
+      .sort((a, b) => a.label.localeCompare(b.label, "he"));
     const classCounts = new Map<string, number>();
     for (const doc of classesSnap.docs) {
       const examPathId = (doc.data() as Class).examPathId;
@@ -533,6 +625,7 @@ export async function createExamPath(data: {
 
   await adminDb.collection("examPaths").doc(id).set({
     ...path,
+    institutionId: await activeInstitutionId(),
     createdAt: FieldValue.serverTimestamp(),
   });
   await invalidateServerCache("examPaths");
@@ -598,26 +691,30 @@ export async function deleteExamPath(id: string): Promise<void> {
 // ─── tracks ───────────────────────────────────────────────────────────────
 
 export async function getTrackById(id: string): Promise<Track | null> {
-  return docData<Track>(await adminDb.collection("tracks").doc(id).get());
+  return readOwned<Track>("tracks", id);
 }
 
 export async function listTracks(): Promise<Track[]> {
-  return cached("tracks", 600_000, async () =>
-    docsData<Track>(await adminDb.collection("tracks").orderBy("name").get())
-  );
+  const key = await scopedCacheKey("tracks");
+  return cached(key, 600_000, async () => {
+    const snap = await scopedCollection("tracks");
+    return docsData<Track>(snap).sort((a, b) => a.name.localeCompare(b.name, "he"));
+  });
 }
 
 // ─── subjects ──────────────────────────────────────────────────────────────
 
 export async function getSubjectById(id: string): Promise<Subject | null> {
-  const subject = docData<Subject>(await adminDb.collection("subjects").doc(id).get());
+  const subject = await readOwned<Subject>("subjects", id);
   return subject ? normalizeSubject(subject) : null;
 }
 
 export async function listSubjects(): Promise<Subject[]> {
-  return cached("subjects", 600_000, async () =>
-    docsData<Subject>(await adminDb.collection("subjects").get()).map(normalizeSubject)
-  );
+  const key = await scopedCacheKey("subjects");
+  return cached(key, 600_000, async () => {
+    const snap = await scopedCollection("subjects");
+    return docsData<Subject>(snap).map(normalizeSubject);
+  });
 }
 
 export async function listSubjectsByPath(pathId: string): Promise<Subject[]> {
@@ -630,7 +727,11 @@ export async function listSubjectsByPath(pathId: string): Promise<Subject[]> {
 export async function createSubject(data: Omit<Subject, "id">) {
   const id = newId();
   const subject = { id, ...data };
-  await adminDb.collection("subjects").doc(id).set({ ...subject, createdAt: FieldValue.serverTimestamp() });
+  await adminDb.collection("subjects").doc(id).set({
+    ...subject,
+    institutionId: await activeInstitutionId(),
+    createdAt: FieldValue.serverTimestamp(),
+  });
   await invalidateServerCache("subjects");
   return subject;
 }
@@ -694,12 +795,14 @@ export async function ensureSocialInvolvementSubject(): Promise<Subject> {
 }
 
 export async function updateSubject(id: string, data: Partial<Omit<Subject, "id">>) {
+  await requireOwned("subjects", id);
   await adminDb.collection("subjects").doc(id).update({ ...data, updatedAt: FieldValue.serverTimestamp() });
   await invalidateServerCache("subjects");
   return getSubjectById(id);
 }
 
 export async function deleteSubject(id: string) {
+  await requireOwned("subjects", id);
   await adminDb.collection("subjects").doc(id).delete();
   await invalidateServerCache("subjects");
   const paths = await listExamPaths();
@@ -713,12 +816,7 @@ export async function deleteSubject(id: string) {
 }
 
 export async function listSubjectsEnriched() {
-  const [subjects, pathsSnap] = await Promise.all([
-    listSubjects(),
-    adminDb.collection("examPaths").orderBy("label").get(),
-  ]);
-
-  const paths = docsData<ExamPath>(pathsSnap).filter((p) => p.key !== "flexible");
+  const [subjects, paths] = await Promise.all([listSubjects(), listExamPaths()]);
   return subjects.map((s) => ({
     ...s,
     pathLinks: paths
@@ -826,9 +924,11 @@ export async function findObligation(obligationId: string) {
 // ─── grades ────────────────────────────────────────────────────────────────
 
 export async function getGradesByStudent(studentId: string): Promise<Grade[]> {
-  return docsData<Grade>(
-    await adminDb.collection("grades").where("studentId", "==", studentId).get()
-  );
+  const student = await getStudentById(studentId);
+  if (!student) return [];
+  const institution = await activeInstitutionId();
+  const snap = await adminDb.collection("grades").where("studentId", "==", studentId).get();
+  return docsData<Grade>(snap).filter((grade) => matchesInstitution(grade, institution));
 }
 
 export async function upsertGrades(
@@ -846,6 +946,9 @@ export async function upsertGrades(
     notes?: string;
   }>
 ) {
+  const student = await getStudentById(studentId);
+  if (!student) throw new Error("התלמיד לא נמצא במוסד הזה");
+  const institution = await activeInstitutionId();
   const results: Grade[] = [];
   for (const g of grades) {
     const score = g.score ?? null;
@@ -899,7 +1002,7 @@ export async function upsertGrades(
         status: g.status,
         notes,
       };
-      await adminDb.collection("grades").doc(id).set(grade);
+      await adminDb.collection("grades").doc(id).set({ ...grade, institutionId: institution });
       results.push(grade);
     } else {
       const doc = existing.docs[0]!;
@@ -953,8 +1056,10 @@ export async function getGradesByStudentsAndObligation(
       .where("studentId", "in", chunk)
       .where("obligationId", "==", obligationId)
       .get();
+    const institution = await activeInstitutionId();
     for (const doc of snap.docs) {
       const grade = { id: doc.id, ...doc.data() } as Grade;
+      if (!matchesInstitution(grade, institution)) continue;
       result.set(grade.studentId, grade);
     }
   }
@@ -974,8 +1079,10 @@ export async function getGradesByStudentIds(
       .collection("grades")
       .where("studentId", "in", chunk)
       .get();
+    const institution = await activeInstitutionId();
     for (const doc of snap.docs) {
       const grade = { id: doc.id, ...doc.data() } as Grade;
+      if (!matchesInstitution(grade, institution)) continue;
       result.set(`${grade.studentId}:${grade.obligationId}`, grade);
     }
   }
@@ -997,6 +1104,7 @@ export async function upsertGradesBulk(
   }>
 ): Promise<Grade[]> {
   if (entries.length === 0) return [];
+  const institution = await activeInstitutionId();
 
   const byObligation = new Map<string, typeof entries>();
   for (const entry of entries) {
@@ -1059,6 +1167,7 @@ export async function upsertGradesBulk(
         batch.delete(adminDb.collection("grades").doc(existing.id));
       } else {
         batch.update(adminDb.collection("grades").doc(existing.id), {
+          institutionId: institution,
           score,
           qualitativeLevel,
           componentScores,
@@ -1096,7 +1205,7 @@ export async function upsertGradesBulk(
         status: entry.status,
         notes,
       };
-      batch.set(adminDb.collection("grades").doc(id), grade);
+      batch.set(adminDb.collection("grades").doc(id), { ...grade, institutionId: institution });
       results.push(grade);
     }
 
@@ -1111,9 +1220,12 @@ export async function upsertGradesBulk(
 }
 
 export async function listClassesSimple() {
-  return cached("classes:simple", 60_000, async () => {
-    const snap = await adminDb.collection("classes").orderBy("name").get();
-    return docsData<Class>(snap).map((cls) => ({
+  const key = await scopedCacheKey("classes:simple");
+  return cached(key, 60_000, async () => {
+    const snap = await scopedCollection("classes");
+    return docsData<Class>(snap)
+      .sort((a, b) => a.name.localeCompare(b.name, "he"))
+      .map((cls) => ({
       id: cls.id,
       name: cls.name,
       gradeYear: cls.gradeYear,
@@ -1129,8 +1241,9 @@ const OBLIGATION_GRADE_YEAR_OVERRIDES = "obligationGradeYearOverrides";
 export async function listObligationGradeYearOverrides(): Promise<
   ObligationClassGradeYearOverride[]
 > {
-  return cached("obligationGradeYearOverrides", 60_000, async () => {
-    const snap = await adminDb.collection(OBLIGATION_GRADE_YEAR_OVERRIDES).get();
+  const key = await scopedCacheKey("obligationGradeYearOverrides");
+  return cached(key, 60_000, async () => {
+    const snap = await scopedCollection(OBLIGATION_GRADE_YEAR_OVERRIDES);
     return docsData<ObligationClassGradeYearOverride>(snap);
   });
 }
@@ -1156,6 +1269,7 @@ export async function createObligationGradeYearOverride(
   };
   await adminDb.collection(OBLIGATION_GRADE_YEAR_OVERRIDES).doc(id).set({
     ...record,
+    institutionId: await activeInstitutionId(),
     createdAt: FieldValue.serverTimestamp(),
     updatedAt: FieldValue.serverTimestamp(),
   });
@@ -1169,9 +1283,12 @@ export async function updateObligationGradeYearOverride(
     Pick<ObligationClassGradeYearOverride, "classIds" | "effectiveGradeYear" | "note">
   >
 ): Promise<ObligationClassGradeYearOverride | null> {
-  const ref = adminDb.collection(OBLIGATION_GRADE_YEAR_OVERRIDES).doc(id);
-  const existing = docData<ObligationClassGradeYearOverride>(await ref.get());
+  const existing = await readOwned<ObligationClassGradeYearOverride>(
+    OBLIGATION_GRADE_YEAR_OVERRIDES,
+    id
+  );
   if (!existing) return null;
+  const ref = adminDb.collection(OBLIGATION_GRADE_YEAR_OVERRIDES).doc(id);
 
   const updates: Partial<ObligationClassGradeYearOverride> = {};
   if (input.classIds !== undefined) {
@@ -1190,9 +1307,9 @@ export async function updateObligationGradeYearOverride(
 }
 
 export async function deleteObligationGradeYearOverride(id: string): Promise<boolean> {
+  const existing = await readOwned(OBLIGATION_GRADE_YEAR_OVERRIDES, id);
+  if (!existing) return false;
   const ref = adminDb.collection(OBLIGATION_GRADE_YEAR_OVERRIDES).doc(id);
-  const existing = await ref.get();
-  if (!existing.exists) return false;
   await ref.delete();
   await invalidateServerCache("obligationGradeYearOverrides");
   return true;
@@ -1207,41 +1324,39 @@ export async function deleteObligationGradeYearOverridesForObligation(
     .get();
   if (snap.empty) return 0;
 
+  const institution = await activeInstitutionId();
+  const owned = snap.docs.filter((doc) => matchesInstitution(doc.data(), institution));
+  if (owned.length === 0) return 0;
+
   const batch = adminDb.batch();
-  for (const doc of snap.docs) {
+  for (const doc of owned) {
     batch.delete(doc.ref);
   }
   await batch.commit();
   await invalidateServerCache("obligationGradeYearOverrides");
-  return snap.size;
+  return owned.length;
 }
 
 // ─── counts ────────────────────────────────────────────────────────────────
 
 export async function getAdminDashboardData() {
-  const [counts, paths, allSubjects] = await Promise.all([
-    Promise.all([
-      adminDb.collection("students").count().get(),
-      adminDb.collection("classes").count().get(),
-      adminDb.collection("subjects").count().get(),
-      adminDb.collection("grades").where("status", "==", "GRADED").count().get(),
-      adminDb.collection("examPaths").count().get(),
-    ]),
-    listExamPaths(),
+  const [students, classes, subjects, grades, paths] = await Promise.all([
+    listStudents(),
+    listClasses(),
     listSubjects(),
+    listAllGrades(),
+    listExamPaths(),
   ]);
-
-  const [students, classes, subjects, grades, pathsCount] = counts;
-  const obligations = allSubjects.reduce((s, sub) => s + sub.obligations.length, 0);
+  const obligations = subjects.reduce((sum, subject) => sum + subject.obligations.length, 0);
 
   return {
     counts: {
-      students: students.data().count,
-      classes: classes.data().count,
-      subjects: subjects.data().count,
-      paths: pathsCount.data().count,
+      students: students.length,
+      classes: classes.length,
+      subjects: subjects.length,
+      paths: paths.length,
       obligations,
-      gradedCount: grades.data().count,
+      gradedCount: grades.filter((grade) => grade.status === "GRADED").length,
     },
     paths,
   };
