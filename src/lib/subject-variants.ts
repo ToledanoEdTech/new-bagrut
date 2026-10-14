@@ -32,18 +32,22 @@ function pieces(
     .join(",");
 }
 
+export function obligationVariantKey(
+  obligation: NonNullable<SubjectVariantInput["obligations"]>[number]
+): string {
+  return [
+    norm(obligation.questionnaireNumber),
+    norm(obligation.name),
+    String(obligation.weightPercent ?? ""),
+    norm(obligation.examType),
+    pieces(obligation.components),
+    pieces(obligation.subItems),
+  ].join("~");
+}
+
 export function subjectVariantKey(subject: SubjectVariantInput): string {
   const obligations = [...(subject.obligations ?? [])]
-    .map((obligation) =>
-      [
-        norm(obligation.questionnaireNumber),
-        norm(obligation.name),
-        String(obligation.weightPercent ?? ""),
-        norm(obligation.examType),
-        pieces(obligation.components),
-        pieces(obligation.subItems),
-      ].join("~")
-    )
+    .map((obligation) => obligationVariantKey(obligation))
     .sort((a, b) => a.localeCompare(b, "he"));
 
   const category = subject.category ?? "";
