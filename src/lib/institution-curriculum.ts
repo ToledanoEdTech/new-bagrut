@@ -1,12 +1,23 @@
 import { FieldValue } from "firebase-admin/firestore";
 import { adminDb } from "@/lib/firebase/admin";
 import { DEFAULT_INSTITUTION } from "@/lib/institutions";
+import { subjectVariantKey, type SubjectVariantInput } from "@/lib/subject-variants";
 
 const TEMPLATE_ID = DEFAULT_INSTITUTION.id;
 const SETTINGS_DOC = "settings/general";
 
 function newId(): string {
   return adminDb.collection("_").doc().id;
+}
+
+function variantFromDoc(data: FirebaseFirestore.DocumentData): SubjectVariantInput {
+  return {
+    name: typeof data.name === "string" ? data.name : "",
+    units: typeof data.units === "number" ? data.units : null,
+    category: typeof data.category === "string" ? data.category : "MANDATORY",
+    trackId: typeof data.trackId === "string" ? data.trackId : null,
+    obligations: Array.isArray(data.obligations) ? data.obligations : [],
+  };
 }
 
 function cloneObligations(value: unknown): unknown[] {
@@ -105,8 +116,12 @@ export async function seedInstitutionCurriculum(institutionId: string): Promise<
     });
   }
 
+  const copiedVariants = new Set<string>();
   for (const doc of templateSubjects.docs) {
     const data = doc.data();
+    const variantKey = subjectVariantKey(variantFromDoc(data));
+    if (copiedVariants.has(variantKey)) continue;
+    copiedVariants.add(variantKey);
     const id = newId();
     const sourceTrackId = typeof data.trackId === "string" ? data.trackId : "";
     await queue(adminDb.collection("subjects").doc(id), {

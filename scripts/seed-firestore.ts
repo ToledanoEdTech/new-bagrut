@@ -16,6 +16,8 @@ import { ADMIN_EMAILS } from "../src/lib/roles";
 
 import type { ExamPathType, SubjectCategory } from "../src/lib/types";
 
+import { subjectVariantKey } from "../src/lib/subject-variants";
+
 
 
 type ParsedCurriculum = {
@@ -134,7 +136,19 @@ async function seedSubjectsFromPath(
 
   for (const s of p.subjects) {
 
-    const cacheKey = `${p.key}:${s.name}:${s.units ?? 0}`;
+    const cacheKey = subjectVariantKey({
+      name: s.name,
+      units: s.units,
+      category: categoryForPath(p.key, s.name),
+      obligations: s.obligations.map((o) => ({
+        questionnaireNumber: o.questionnaireNumber,
+        name: o.eventName,
+        weightPercent: o.weightPercent,
+        examType: o.examType,
+        components: o.components,
+        subItems: o.subItems,
+      })),
+    });
 
     let subjectId = subjectCache.get(cacheKey);
 
@@ -194,7 +208,7 @@ async function seedSubjectsFromPath(
 
 
 
-    subjectIds.push(subjectId);
+    if (!subjectIds.includes(subjectId)) subjectIds.push(subjectId);
 
   }
 

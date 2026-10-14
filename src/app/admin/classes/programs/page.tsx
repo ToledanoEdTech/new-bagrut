@@ -20,8 +20,12 @@ import { useToast } from "@/components/ui/Toast";
 import { useConfirm } from "@/components/ui/ConfirmDialog";
 import { SearchInput } from "@/components/ui/SearchInput";
 import { invalidateCache } from "@/lib/api-cache";
-import { formatSubjectWithPathLinks } from "@/lib/subject-display";
-import type { ExamPathType, SubjectCategory } from "@/lib/types";
+import {
+  pickSubjectVariants,
+  subjectIdsInVariant,
+  subjectQuestionnaireNumbers,
+} from "@/lib/subject-variants";
+import type { ExamPathType, Obligation, SubjectCategory } from "@/lib/types";
 
 type ExamPath = {
   id: string;
@@ -38,6 +42,7 @@ type Subject = {
   name: string;
   units: number | null;
   category: SubjectCategory | string;
+  obligations?: Obligation[];
   pathLinks?: Array<{ path: { label: string; id: string } }>;
 };
 
@@ -103,32 +108,44 @@ export default function ProgramsPage() {
 
   const editingPath = editingId ? paths.find((p) => p.id === editingId) : null;
 
+  const visibleVariants = useMemo(() => {
+    const filtered = subjects.filter(
+      (s) => showAllCategories || s.category === "MANDATORY" || s.category === "SOCIAL"
+    );
+    return pickSubjectVariants(filtered, form.subjectIds);
+  }, [subjects, showAllCategories, form.subjectIds]);
+
   const selectableSubjects = useMemo(() => {
     const q = subjectQuery.trim().toLowerCase();
-    return subjects
-      .filter((s) => {
-        if (!showAllCategories && s.category !== "MANDATORY" && s.category !== "SOCIAL") {
-          return false;
-        }
-        if (!q) return true;
-        return s.name.toLowerCase().includes(q);
-      })
+    return visibleVariants
+      .filter((s) => !q || s.name.toLowerCase().includes(q))
       .sort((a, b) => {
         const ai = CATEGORY_ORDER.indexOf(a.category);
         const bi = CATEGORY_ORDER.indexOf(b.category);
         const ar = ai === -1 ? 99 : ai;
         const br = bi === -1 ? 99 : bi;
         if (ar !== br) return ar - br;
-        return a.name.localeCompare(b.name, "he");
+        const byName = a.name.localeCompare(b.name, "he");
+        if (byName !== 0) return byName;
+        return (a.units ?? 0) - (b.units ?? 0);
       });
-  }, [subjects, subjectQuery, showAllCategories]);
+  }, [visibleVariants, subjectQuery]);
 
   const selectedSubjects = useMemo(() => {
     const byId = new Map(subjects.map((s) => [s.id, s]));
-    return form.subjectIds
+    const selected = form.subjectIds
       .map((id) => byId.get(id))
       .filter(Boolean) as Subject[];
+    return pickSubjectVariants(selected, form.subjectIds);
   }, [form.subjectIds, subjects]);
+
+  const duplicateNames = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const subject of visibleVariants) {
+      counts.set(subject.name, (counts.get(subject.name) ?? 0) + 1);
+    }
+    return counts;
+  }, [visibleVariants]);
 
   function openCreate() {
     setCreating(true);
@@ -154,12 +171,46 @@ export default function ProgramsPage() {
   }
 
   function toggleSubject(subjectId: string) {
-    setForm((f) => ({
-      ...f,
-      subjectIds: f.subjectIds.includes(subjectId)
-        ? f.subjectIds.filter((id) => id !== subjectId)
-        : [...f.subjectIds, subjectId],
-    }));
+    const groupIds = subjectIdsInVariant(subjects, subjectId);
+    setForm((f) => {
+      const selected = groupIds.some((id) => f.subjectIds.includes(id));
+      return {
+        ...f,
+        subjectIds: selected
+          ? f.subjectIds.filter((id) => !groupIds.includes(id))
+          : [...f.subjectIds.filter((id) => !groupIds.includes(id)), subjectId],
+      };
+    });
+  }
+
+  function variantExtra(subject: Subject): string | null {
+    if ((duplicateNames.get(subject.name) ?? 0) < 2) return null;
+    const questionnaires = subjectQuestionnaireNumbers(subject);
+    const units = subject.units != null ? `${subject.units} יח"ל` : null;
+    const questionnaireLabel = questionnaires.length
+      ? `שאלונים ${questionnaires.join(", ")}`
+      : null;
+    const taskLabel =
+      questionnaireLabel == null
+        ? (subject.obligations ?? [])
+            .map((obligation) => obligation.name)
+            .filter((name): name is string => Boolean(name))
+            .join(", ") || null
+        : null;
+    const extra = [units, questionnaireLabel, taskLabel].filter(Boolean).join(" · ");
+    return extra || null;
+  }
+
+  function subjectChoiceLabel(subject: Subject): string {
+    const extra = variantExtra(subject);
+    return extra ? `${subject.name} (${extra})` : subject.name;
+  }
+
+  function subjectMeta(subject: Subject): string {
+    const category = CATEGORY_LABELS[subject.category] ?? subject.category;
+    const extra = variantExtra(subject);
+    if (extra) return `${category} · ${extra}`;
+    return subject.units != null ? `${category} · ${subject.units} יח"ל` : category;
   }
 
   async function save() {
@@ -169,11 +220,18 @@ export default function ProgramsPage() {
     }
     setSaving(true);
     try {
+      const selected = subjects.filter((subject) => form.subjectIds.includes(subject.id));
+      const collapsedIds = pickSubjectVariants(selected, form.subjectIds).map(
+        (subject) => subject.id
+      );
+      const missingIds = form.subjectIds.filter(
+        (id) => !subjects.some((subject) => subject.id === id)
+      );
       const payload = {
         label: form.label.trim(),
         description: form.description.trim() || null,
         pathType: form.pathType,
-        subjectIds: form.subjectIds,
+        subjectIds: [...collapsedIds, ...missingIds],
       };
       const res = await fetch("/api/paths", {
         method: creating ? "POST" : "PATCH",
@@ -241,8 +299,9 @@ export default function ProgramsPage() {
               <h2 className="text-xl font-bold text-slate-900">
                 {creating ? "תוכנית חדשה" : `עריכת ${editingPath?.label ?? "תוכנית"}`}
               </h2>
-              <p className="mt-1 text-sm text-slate-500">
+                <p className="mt-1 text-sm text-slate-500">
                 בחרו אילו מקצועות חובה כלולים בתוכנית. מתמטיקה, אנגלית ומגמות נקבעים לפי התלמיד.
+                מקצוע זהה מופיע פעם אחת; הוא מופרד רק כשיש הבדל במטלות, ביחידות או במספר השאלון.
               </p>
             </div>
             <div className="flex gap-2">
@@ -299,7 +358,7 @@ export default function ProgramsPage() {
               <div>
                 <h3 className="font-semibold text-slate-900">מקצועות בתוכנית</h3>
                 <p className="text-sm text-slate-500">
-                  נבחרו {form.subjectIds.length} מקצועות
+                  נבחרו {selectedSubjects.length} מקצועות
                 </p>
               </div>
               <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-600">
@@ -323,10 +382,7 @@ export default function ProgramsPage() {
                     className="inline-flex items-center gap-1.5 rounded-lg bg-primary-50 px-2.5 py-1 text-sm font-medium text-primary-800 ring-1 ring-inset ring-primary-100 transition hover:bg-primary-100"
                     title="הסר מהתוכנית"
                   >
-                    {formatSubjectWithPathLinks(s.name, s.pathLinks, {
-                      units: s.units,
-                      category: s.category,
-                    })}
+                    {subjectChoiceLabel(s)}
                     <X className="h-3.5 w-3.5 opacity-60" />
                   </button>
                 ))}
@@ -352,7 +408,9 @@ export default function ProgramsPage() {
             ) : (
               <div className="mt-4 max-h-[28rem] space-y-1 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50/50 p-2">
                 {selectableSubjects.map((s) => {
-                  const checked = form.subjectIds.includes(s.id);
+                  const checked = subjectIdsInVariant(subjects, s.id).some((id) =>
+                    form.subjectIds.includes(id)
+                  );
                   return (
                     <label
                       key={s.id}
@@ -367,16 +425,8 @@ export default function ProgramsPage() {
                         onChange={() => toggleSubject(s.id)}
                       />
                       <div className="min-w-0 flex-1">
-                        <p className="font-medium text-slate-900">
-                          {formatSubjectWithPathLinks(s.name, s.pathLinks, {
-                            units: s.units,
-                            category: s.category,
-                          })}
-                        </p>
-                        <p className="text-xs text-slate-500">
-                          {CATEGORY_LABELS[s.category] ?? s.category}
-                          {s.units != null ? ` · ${s.units} יח"ל` : ""}
-                        </p>
+                        <p className="font-medium text-slate-900">{s.name}</p>
+                        <p className="text-xs text-slate-500">{subjectMeta(s)}</p>
                       </div>
                     </label>
                   );
