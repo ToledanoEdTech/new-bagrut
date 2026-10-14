@@ -1,0 +1,32 @@
+# dependencies
+node_modules
+
+# next.js
+.next
+out
+
+# env files — לעולם לא להעלות ל-GitHub
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env*.local
+
+# firebase secrets
+firebase-service-account.json
+*-firebase-adminsdk-*.json
+
+# old sqlite database
+prisma/*.db
+prisma/*.db-journal
+
+# misc
+*.log
+.DS_Store
+.vercel
+tsconfig.tsbuildinfo
+__pycache__/
+*.pyc
+_diag*.png
+.env*
