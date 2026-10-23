@@ -51,7 +51,7 @@ async function main() {
         examType: "פנימי",
         studyMaterial: null,
         examEvent: null,
-        gradeYear: "שכבת יא",
+        gradeYear: "שכבת יב",
         gradeEntryDueDate: defaultGradeEntryDueDate(),
         sortOrder: 0,
         components: [],
@@ -61,7 +61,7 @@ async function main() {
         obligations: [obligation],
         updatedAt: FieldValue.serverTimestamp(),
       });
-      console.log("Added default obligation for שכבת יא");
+      console.log("Added default obligation for שכבת יב");
     }
   } else {
     const ref = adminDb.collection("subjects").doc();
@@ -74,7 +74,7 @@ async function main() {
       examType: "פנימי",
       studyMaterial: null,
       examEvent: null,
-      gradeYear: "שכבת יא",
+      gradeYear: "שכבת יב",
       gradeEntryDueDate: defaultGradeEntryDueDate(),
       sortOrder: 0,
       components: [],

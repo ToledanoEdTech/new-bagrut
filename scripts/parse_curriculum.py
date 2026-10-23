@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Parse curriculum raw JSON into structured JSON for seeding."""
+"""Parse curriculum raw JSON into structured JSON for seeding.
+
+Re-run scripts/apply-curriculum-gaps.ts after parsing. That script restores
+questionnaire numbers, grade years, and merged tasks that are not in the spreadsheet.
+"""
 import json
 import re
 from pathlib import Path

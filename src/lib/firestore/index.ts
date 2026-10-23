@@ -764,7 +764,7 @@ export async function ensureSocialInvolvementSubject(): Promise<Subject> {
           examType: "פנימי",
           studyMaterial: null,
           examEvent: null,
-          gradeYear: "שכבת יא",
+          gradeYear: "שכבת יב",
           gradeEntryDueDate: `${new Date().getFullYear()}-06-01`,
           sortOrder: 0,
           components: [],
